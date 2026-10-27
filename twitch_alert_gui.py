@@ -8,8 +8,12 @@ Starten:       python twitch_alert_gui.py   (oder als .pyw ohne Konsole)
 import json
 import os
 import queue
+import re
+import shutil
+import subprocess
 import sys
 import threading
+import time
 import webbrowser
 import tkinter as tk
 from tkinter import messagebox
@@ -38,6 +42,11 @@ MOND = "#f3e9c6"
 GRUEN = "#5be3a0"
 SCHRIFT = "Segoe UI"
 
+# ---------- Version / Update ----------
+# Bei jedem Update die Versionsnummer erhöhen, sonst erkennt das Programm es nicht.
+VERSION = "1.1.0"
+UPDATE_URL = "https://raw.githubusercontent.com/AwayToMoon/Twitch-Alerts/refs/heads/main/twitch_alert_gui.py"
+
 # Config liegt neben dem Skript bzw. der .exe
 BASIS = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
 CONFIG_DATEI = os.path.join(BASIS, "twitch_alert_config.json")
@@ -52,6 +61,7 @@ STANDARD = {
     "autostart": True,   # Überwachung beim Öffnen automatisch starten
     "tray": True,        # beim Schließen im Infobereich weiterlaufen
     "minimiert": False,  # beim Start nur im Infobereich anzeigen
+    "update_check": True,  # beim Start nach neuer Version suchen
 }
 
 
@@ -155,6 +165,22 @@ def alarm(stream, cfg, log):
         webbrowser.open(f"https://twitch.tv/{stream['user_login']}")
 
 
+# ---------- Update-Hilfen ----------
+def version_tuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", v))
+
+
+def hole_update_text():
+    r = requests.get(UPDATE_URL, params={"t": int(time.time())}, timeout=15)
+    r.raise_for_status()
+    return r.content.decode("utf-8")
+
+
+def finde_version(text):
+    m = re.search(r'^VERSION = "([\d.]+)"', text, re.MULTILINE)
+    return m.group(1) if m else None
+
+
 # ---------- Zeichen- und Bedienelemente ----------
 def zeichne_mond(c, cx, cy, r, hintergrund):
     """Halbmond: heller Kreis, mit Hintergrundfarbe angeschnitten."""
@@ -255,8 +281,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Twitch Live-Alert")
-        self.geometry("480x760")
-        self.minsize(460, 660)
+        self.geometry("480x820")
+        self.minsize(460, 720)
         self.configure(bg=BG)
         self.cfg = lade_config()
         self.monitor = None
@@ -274,6 +300,8 @@ class App(tk.Tk):
             self.umschalten()
         if c["minimiert"] and self.tray:
             self.withdraw()
+        if c["update_check"] and not getattr(sys, "frozen", False):
+            self.after(3000, self.update_pruefen)
 
     # ---------- Oberfläche ----------
     def bauen(self):
@@ -318,14 +346,18 @@ class App(tk.Tk):
         self.v_auto = tk.BooleanVar(value=self.cfg["autostart"])
         self.v_tray = tk.BooleanVar(value=self.cfg["tray"])
         self.v_min = tk.BooleanVar(value=self.cfg["minimiert"])
+        self.v_upd = tk.BooleanVar(value=self.cfg["update_check"])
         schalter = [("Ton abspielen", self.v_ton),
                     ("Stream im Browser öffnen", self.v_browser),
-                    ("Überwachung beim Öffnen automatisch starten", self.v_auto)]
+                    ("Überwachung beim Öffnen automatisch starten", self.v_auto),
+                    ("Beim Start nach Updates suchen", self.v_upd)]
         if HAT_TRAY:
             schalter += [("Beim Schließen im Infobereich weiterlaufen", self.v_tray),
                          ("Minimiert starten (nur Symbol neben der Uhr)", self.v_min)]
         for txt, var in schalter:
             Schalter(opt, txt, var).pack(fill="x", pady=3)
+        Knopf(opt, "⟳  Jetzt nach Updates suchen", lambda: self.update_pruefen(True),
+              klein=True).pack(anchor="w", pady=(8, 0))
 
         knoepfe = tk.Frame(self, bg=BG)
         knoepfe.pack(fill="x", padx=16, pady=8)
@@ -349,6 +381,7 @@ class App(tk.Tk):
         zeichne_mond(c, 52, 48, 22, BG)
         c.create_text(92, 38, text="Twitch Live-Alert", anchor="w", fill=TEXT, font=(SCHRIFT, 17, "bold"))
         c.create_text(92, 66, text=self.status[0], anchor="w", fill=self.status[1], font=(SCHRIFT, 10))
+        c.create_text(breite - 16, 84, text=f"v{VERSION}", anchor="e", fill="#5b4f87", font=(SCHRIFT, 8))
 
     def setze_status(self, aktiv):
         n = self.liste.size()
@@ -388,6 +421,7 @@ class App(tk.Tk):
             "autostart": self.v_auto.get(),
             "tray": self.v_tray.get(),
             "minimiert": self.v_min.get(),
+            "update_check": self.v_upd.get(),
         }
         # In-place aktualisieren, damit die laufende Überwachung Änderungen sofort übernimmt
         self.cfg.clear()
@@ -427,6 +461,10 @@ class App(tk.Tk):
                         self.zeige_popup(*zeile[1:])
                     elif zeile[0] == "cmd":
                         self.befehl(zeile[1])
+                    elif zeile[0] == "update":
+                        self.frage_update(zeile[1], zeile[2])
+                    elif zeile[0] == "info":
+                        messagebox.showinfo("Twitch Live-Alert", zeile[1])
                     continue
                 self.text.config(state="normal")
                 self.text.insert("end", f"{datetime.now():%H:%M:%S}  ", "zeit")
@@ -517,6 +555,62 @@ class App(tk.Tk):
 
         einblenden()
         fortschritt()
+
+    # ---------- Updates ----------
+    def update_pruefen(self, manuell=False):
+        if getattr(sys, "frozen", False):
+            if manuell:
+                self.msgs.put(("info", "Die .exe kann sich nicht selbst aktualisieren.\n"
+                                       "Nutze die .pyw-Variante für automatische Updates."))
+            return
+
+        def arbeit():
+            try:
+                text = hole_update_text()
+                neu = finde_version(text)
+                if neu and version_tuple(neu) > version_tuple(VERSION):
+                    self.msgs.put(("update", neu, text))
+                elif manuell:
+                    self.msgs.put(("info", f"Du nutzt bereits die neueste Version (v{VERSION})."))
+            except (requests.RequestException, UnicodeDecodeError):
+                if manuell:
+                    self.msgs.put(("info", "Update-Suche fehlgeschlagen – keine Verbindung zu GitHub."))
+        threading.Thread(target=arbeit, daemon=True).start()
+
+    def frage_update(self, neu, text):
+        if self.state() == "withdrawn":  # Fenster im Infobereich: nicht mit Dialog stören
+            self.msgs.put(f"Update v{neu} verfügbar – Fenster öffnen und „Jetzt nach Updates suchen“ klicken.")
+            return
+        if not messagebox.askyesno("Update verfügbar",
+                                   f"Version {neu} ist verfügbar (du hast v{VERSION}).\n\n"
+                                   "Jetzt aktualisieren und neu starten?"):
+            return
+        pfad = os.path.abspath(__file__)
+        try:
+            compile(text, "update", "exec")  # Syntax prüfen, bevor etwas überschrieben wird
+            if "class App" not in text or "VERSION" not in text:
+                raise ValueError("Heruntergeladene Datei wirkt unvollständig.")
+            shutil.copy2(pfad, pfad + ".bak")  # Sicherung der alten Version
+            tmp = pfad + ".neu"
+            with open(tmp, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+            os.replace(tmp, pfad)
+        except Exception as e:
+            messagebox.showerror("Update fehlgeschlagen", f"Das Update wurde nicht installiert:\n{e}")
+            return
+        self.sammle_config()
+        if self.monitor:
+            self.monitor.stop_event.set()
+        if self.tray:
+            try:
+                self.tray.stop()
+            except Exception:
+                pass
+        try:
+            subprocess.Popen([sys.executable, pfad])
+        except Exception as e:
+            messagebox.showerror("Neustart fehlgeschlagen", f"Bitte das Programm von Hand starten:\n{e}")
+        self.destroy()
 
     # ---------- Infobereich (Tray) ----------
     def tray_starten(self):
