@@ -31,11 +31,24 @@ Ein kleines Windows-Programm, das dich benachrichtigt, sobald deine Lieblings-St
 | 📲 **Handy-Push** | Über [ntfy](https://ntfy.sh), Discord oder Telegram |
 | 📊 **Verlauf** | Wer wann wie lange live war, Zuschauer-Peak der letzten 7 Tage |
 | 🪟 **Infobereich** | Läuft unsichtbar neben der Uhr weiter, auf Wunsch minimiert gestartet |
-| 🔄 **Selbst-Update** | Prüft beim Start, ob es eine neue Version gibt |
+| 🔄 **Updates** | Prüft beim Start auf neue Versionen (Python-Variante aktualisiert sich selbst, die `.exe` verweist auf den Download) |
 
 ---
 
-## 🚀 Schnellstart
+## 📥 Download (ohne Python)
+
+Du willst nichts installieren? Dann nimm die fertige Windows-Version:
+
+1. Öffne die **[Release-Seite](https://github.com/AwayToMoon/Twitch-Alerts/releases/latest)**.
+2. Lade unter **Assets** die Datei **`TwitchLiveAlert.exe`** herunter.
+3. Lege sie in einen **eigenen Ordner**, zum Beispiel `C:\TwitchAlert`. Dort speichert sie ihre Einstellungen.
+4. Starte sie per Doppelklick und richte den Twitch-Zugang ein (Schritt 4 und 5 unten).
+
+> ⚠️ **Windows-Warnung:** Die Datei ist nicht digital signiert. Windows zeigt deshalb beim ersten Start „Der Computer wurde durch Windows geschützt". Klicke auf **Weitere Informationen → Trotzdem ausführen**. Manche Virenscanner schlagen bei solchen Programmen auch fälschlich an. Wer dem nicht traut, nutzt die Python-Variante, der Quellcode ist offen einsehbar.
+
+---
+
+## 🚀 Schnellstart (mit Python)
 
 ### 1. Python installieren
 
@@ -185,7 +198,7 @@ Beim Start vergleicht das Programm seine Versionsnummer mit der Datei in diesem 
 
 Manuell suchst du im Tab **System** über **⟳ Jetzt nach Updates suchen**.
 
-> ⚠️ Das Selbst-Update funktioniert nur bei `.py`/`.pyw`, nicht bei einer gebauten `.exe`.
+> ℹ️ Das automatische Ersetzen funktioniert nur bei `.py`/`.pyw`. Die `.exe` weist dich bei einer neuen Version stattdessen darauf hin und öffnet die Download-Seite.
 > Wenn du dieses Projekt **forkst**, ändere in der Datei die Konstante `UPDATE_URL` auf dein eigenes Repository.
 
 ---
@@ -255,10 +268,14 @@ Windows kennt die Endung noch nicht. Nutze die Verknüpfung aus dem Abschnitt �
 
 ```bash
 python -m pip install pyinstaller
-python -m PyInstaller --clean --onefile --noconsole --hidden-import pystray._win32 twitch_alert_gui.py
+python -m PyInstaller --clean --onefile --noconsole --name TwitchLiveAlert --icon twitch_alert.ico --hidden-import pystray._win32 twitch_alert_gui.py
 ```
 
-Die fertige Datei liegt danach im Ordner `dist`. Das Selbst-Update steht in diesem Fall nicht zur Verfügung.
+Die Datei `twitch_alert.ico` (das Mond-Symbol) muss dafür im selben Ordner wie das Programm liegen.
+
+Die fertige `TwitchLiveAlert.exe` liegt danach im Ordner `dist`.
+
+**Als Release veröffentlichen:** Im Repository unter **Releases → Create a new release** eine Versionsnummer wie `v2.1.0` vergeben (**Create new tag**), die `.exe` unten bei „Attach binaries“ hineinziehen und auf **Publish release** klicken.
 
 ---
 
