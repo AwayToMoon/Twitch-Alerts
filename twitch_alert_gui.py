@@ -56,8 +56,9 @@ FARBEN = ["", "#ff4d6d", "#4dd0ff", "#5be3a0", "#ffb84d", "#ff7ad9"]  # "" = Sta
 
 # ---------- Version / Update ----------
 # Bei jedem Update die Versionsnummer erhöhen, sonst erkennt das Programm es nicht.
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 UPDATE_URL = "https://raw.githubusercontent.com/AwayToMoon/Twitch-Alerts/refs/heads/main/twitch_alert_gui.py"
+RELEASES_URL = "https://github.com/AwayToMoon/Twitch-Alerts/releases/latest"  # Download der fertigen .exe
 
 # Dateien liegen neben dem Skript bzw. der .exe
 BASIS = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
@@ -72,7 +73,7 @@ STANDARD = {
     "ruhe_an": False, "ruhe_von": "23:00", "ruhe_bis": "08:00",
     "browser": False, "profilbild": True, "vorschau": True,
     "meld_spiel": False, "meld_titel": False, "meld_offline": False,
-    "autostart": True, "tray": True, "minimiert": False, "update_check": True,
+    "autostart": True, "tray": True, "minimiert": False, "update_check": True, "log_pruefung": False,
     "push_ntfy": False, "ntfy_topic": "",
     "push_discord": False, "discord_url": "",
     "push_telegram": False, "telegram_token": "", "telegram_chat": "",
@@ -378,6 +379,9 @@ class Monitor(threading.Thread):
             info[n.lower()] = {"live": bool(s), "spiel": (s.get("game_name") or "–") if s else "",
                                "zuschauer": s.get("viewer_count", 0) if s else 0}
         self.log(("live_status", info))
+        if cfg["log_pruefung"]:
+            live_namen = [n for n, i in info.items() if i["live"]]
+            self.log("Geprüft – live: " + (", ".join(live_namen) if live_namen else "niemand"))
 
         for login, s in aktuell.items():
             name = s.get("user_name", login)
@@ -601,7 +605,7 @@ class App(tk.Tk):
             self.umschalten()
         if c["minimiert"] and self.tray:
             self.withdraw()
-        if c["update_check"] and not getattr(sys, "frozen", False):
+        if c["update_check"]:
             self.after(3000, self.update_pruefen)
 
     # ---------- Variablen ----------
@@ -674,6 +678,8 @@ class App(tk.Tk):
     # --- Tab: Übersicht ---
     def seite_uebersicht(self, f):
         k = karte(f, "Live-Übersicht")
+        self.pruef_lbl = tk.Label(k, text="Noch nicht gestartet", bg=PANEL, fg=LEISE, font=(SCHRIFT, 8), anchor="e")
+        self.pruef_lbl.pack(fill="x", pady=(0, 4))
         self.live_box = tk.Frame(k, bg=PANEL)
         self.live_box.pack(fill="x")
         zeile = tk.Frame(f, bg=BG)
@@ -710,7 +716,7 @@ class App(tk.Tk):
             tk.Label(zeile, text=n, fg=TEXT if live else GEDAEMPFT, bg=PANEL,
                      font=(SCHRIFT, 10, "bold")).pack(side="left", padx=8)
             rechts = (f"{info['spiel']}  ·  {fmt_zahl(info['zuschauer'])} Zuschauer" if live
-                      else ("offline" if self.laeuft() else "–"))
+                      else ("offline" if info else ("wird geprüft …" if self.laeuft() else "–")))
             tk.Label(zeile, text=rechts, fg=AKZENT_HELL if live else LEISE, bg=PANEL,
                      font=(SCHRIFT, 9)).pack(side="right")
             for w in [zeile] + list(zeile.winfo_children()):
@@ -911,6 +917,7 @@ class App(tk.Tk):
             schalter += [("Beim Schließen im Infobereich weiterlaufen", "tray"),
                          ("Minimiert starten (nur Symbol neben der Uhr)", "minimiert")]
         schalter.append(("Beim Start nach Updates suchen", "update_check"))
+        schalter.append(("Jede Prüfung im Protokoll anzeigen", "log_pruefung"))
         for txt, key in schalter:
             Schalter(k, txt, self.var(key)).pack(fill="x", pady=2)
         Knopf(k, "⟳  Jetzt nach Updates suchen", lambda: self.update_pruefen(True),
@@ -986,6 +993,7 @@ class App(tk.Tk):
             self.monitor.stop_event.set()
             self.monitor = None
             self.live_info = {}
+            self.pruef_lbl.config(text="Überwachung gestoppt")
             self.btn.setze("▶  Starten", True)
             self.zeichne_live_liste()
             self.aktualisiere_status()
@@ -1000,6 +1008,7 @@ class App(tk.Tk):
         self.monitor = Monitor(self.cfg, self.msgs.put)
         self.monitor.start()
         self.btn.setze("■  Stoppen", False)
+        self.pruef_lbl.config(text="Prüfe …")
         self.aktualisiere_status()
 
     def test(self):
@@ -1026,6 +1035,7 @@ class App(tk.Tk):
                         self.zeige_popup(zeile[1])
                     elif zeile[0] == "live_status":
                         self.live_info = zeile[1]
+                        self.pruef_lbl.config(text=f"Zuletzt geprüft: {datetime.now():%H:%M:%S}")
                         self.zeichne_live_liste()
                         self.aktualisiere_status()
                     elif zeile[0] == "cmd":
@@ -1145,12 +1155,6 @@ class App(tk.Tk):
 
     # ---------- Updates ----------
     def update_pruefen(self, manuell=False):
-        if getattr(sys, "frozen", False):
-            if manuell:
-                self.msgs.put(("info", "Die .exe kann sich nicht selbst aktualisieren.\n"
-                                       "Nutze die .pyw-Variante für automatische Updates."))
-            return
-
         def arbeit():
             try:
                 text = hole_update_text()
@@ -1167,6 +1171,12 @@ class App(tk.Tk):
     def frage_update(self, neu, text):
         if self.state() == "withdrawn":  # Fenster im Infobereich: nicht mit Dialog stören
             self.msgs.put(f"Update v{neu} verfügbar – Fenster öffnen, Tab „System“ → „Jetzt nach Updates suchen“.")
+            return
+        if getattr(sys, "frozen", False):  # .exe: kann sich nicht selbst ersetzen -> auf Download hinweisen
+            if messagebox.askyesno("Neue Version verfügbar",
+                                   f"Version {neu} ist verfügbar (du hast v{VERSION}).\n\n"
+                                   "Die Release-Seite öffnen, um die neue .exe herunterzuladen?"):
+                webbrowser.open(RELEASES_URL)
             return
         if not messagebox.askyesno("Update verfügbar",
                                    f"Version {neu} ist verfügbar (du hast v{VERSION}).\n\n"
