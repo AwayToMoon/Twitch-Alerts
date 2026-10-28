@@ -56,7 +56,7 @@ FARBEN = ["", "#ff4d6d", "#4dd0ff", "#5be3a0", "#ffb84d", "#ff7ad9"]  # "" = Sta
 
 # ---------- Version / Update ----------
 # Bei jedem Update die Versionsnummer erhöhen, sonst erkennt das Programm es nicht.
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 UPDATE_URL = "https://raw.githubusercontent.com/AwayToMoon/Twitch-Alerts/refs/heads/main/twitch_alert_gui.py"
 RELEASES_URL = "https://github.com/AwayToMoon/Twitch-Alerts/releases/latest"  # Download der fertigen .exe
 
@@ -471,13 +471,23 @@ def zeichne_sterne(c, punkte):
         c.create_oval(x - s, y - s, x + s, y + s, fill=AKZENT_HELL, outline="")
 
 
-def tray_bild():
-    bild = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+def icon_bild(groesse=64):
+    """Mond-Symbol (dunkler Kreis, lila Rand, Halbmond), weich gezeichnet."""
+    n = groesse * 8
+    u = n / 64
+    bild = Image.new("RGBA", (n, n), (0, 0, 0, 0))
     d = ImageDraw.Draw(bild)
-    d.ellipse((2, 2, 62, 62), fill=(21, 15, 43, 255), outline=(157, 107, 255, 255), width=3)
-    d.ellipse((15, 14, 47, 46), fill=(243, 233, 198, 255))
-    d.ellipse((25, 8, 57, 40), fill=(21, 15, 43, 255))
-    return bild
+    d.ellipse((2 * u, 2 * u, 62 * u, 62 * u), fill=(21, 15, 43, 255), outline=(157, 107, 255, 255), width=int(3 * u))
+    maske = Image.new("L", (n, n), 0)  # Halbmond per Maske, damit der Rand unberührt bleibt
+    md = ImageDraw.Draw(maske)
+    md.ellipse((15 * u, 14 * u, 47 * u, 46 * u), fill=255)
+    md.ellipse((25 * u, 8 * u, 57 * u, 40 * u), fill=0)
+    bild.paste((243, 233, 198, 255), (0, 0), maske)
+    return bild.resize((groesse, groesse), Image.LANCZOS)
+
+
+def tray_bild():
+    return icon_bild(64)
 
 
 def dunkle_titelleiste(fenster):
@@ -582,6 +592,17 @@ class App(tk.Tk):
         self.geometry("560x790")
         self.minsize(540, 730)
         self.configure(bg=BG)
+        try:  # eigene App-ID: die Taskleiste zeigt dann das Mond-Symbol statt des Python-Symbols
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AwayToMoon.TwitchLiveAlert")
+        except Exception:
+            pass
+        if HAT_PIL:
+            try:
+                self._icons = [ImageTk.PhotoImage(icon_bild(g)) for g in (64, 32)]
+                self.iconphoto(True, *self._icons)
+            except Exception:
+                pass
         self.cfg = lade_config()
         self.vars = {}
         self.monitor = None
